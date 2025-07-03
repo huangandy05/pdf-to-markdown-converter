@@ -30,6 +30,14 @@ interface MarkdownData {
   error?: string;
 }
 
+interface SummaryData {
+  exists: boolean;
+  markdown_source?: string;
+  html_content?: string;
+  filename?: string;
+  error?: string;
+}
+
 export default function FileViewer({
   lessonId,
   fileId,
@@ -37,8 +45,10 @@ export default function FileViewer({
   onBack,
 }: FileViewerProps) {
   const [markdownData, setMarkdownData] = useState<MarkdownData | null>(null);
+  const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [pdfExists, setPdfExists] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [generatingSummary, setGeneratingSummary] = useState(false);
   const [zoom, setZoom] = useState(1.0);
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const pdfContainerRef = useRef<HTMLDivElement>(null);
@@ -94,11 +104,89 @@ export default function FileViewer({
         setMarkdownData({ exists: false, error: "Failed to load markdown" });
       }
 
+      // Fetch summary content
+      await fetchSummaryData();
+
       setLoading(false);
     };
 
     fetchContent();
   }, [lessonId, fileId]);
+
+  const fetchSummaryData = async () => {
+    try {
+      const summaryResponse = await fetch(
+        `http://localhost:8000/api/lessons/${lessonId}/files/${fileId}/summary`
+      );
+      if (summaryResponse.ok) {
+        const data = await summaryResponse.json();
+        console.log("Summary data received:", data);
+        setSummaryData(data);
+      } else {
+        console.error("Summary response not ok:", summaryResponse.status);
+        setSummaryData({ exists: false, error: "Failed to load summary" });
+      }
+    } catch (error) {
+      console.error("Error fetching summary:", error);
+      setSummaryData({ exists: false, error: "Failed to load summary" });
+    }
+  };
+
+  const handleGenerateSummary = async () => {
+    setGeneratingSummary(true);
+
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/lessons/${lessonId}/files/${fileId}/generate-summary`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model_name: "mistral",
+            chunk_size: 2000,
+            chunk_overlap: 200,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.summary) {
+          setSummaryData(result.summary);
+          // Optional: Show success message
+        } else {
+          throw new Error(result.message || "Failed to generate summary");
+        }
+      } else {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.detail ||
+            `HTTP ${response.status}: Failed to generate summary`
+        );
+      }
+    } catch (error) {
+      console.error("Error generating summary:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to generate summary";
+
+      // Show error to user
+      if (errorMessage.includes("Ollama service not available")) {
+        alert(
+          "Ollama service is not running. Please start Ollama and ensure the llama3.2 model is installed."
+        );
+      } else if (errorMessage.includes("HTTP 503")) {
+        alert(
+          "Summary generation service is unavailable. Please check that Ollama is running."
+        );
+      } else {
+        alert(`Error generating summary: ${errorMessage}`);
+      }
+    } finally {
+      setGeneratingSummary(false);
+    }
+  };
 
   // Custom image component for react-markdown that handles errors
   const ImageComponent = ({ src, alt, ...props }: any) => {
@@ -292,7 +380,7 @@ export default function FileViewer({
   }
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden p-1">
       {/* Header */}
       <div className="border-b px-2 py-2 flex items-center justify-between bg-white flex-shrink-0">
         <div className="flex items-center gap-4">
@@ -363,10 +451,11 @@ export default function FileViewer({
                 defaultValue="rendered"
                 className="flex-1 flex flex-col overflow-hidden"
               >
-                <div className="border-b px-4 flex-shrink-0">
-                  <TabsList className="grid w-48 grid-cols-2">
+                <div className="border-b p-1 flex-shrink-0">
+                  <TabsList className="grid w-72 grid-cols-3">
                     <TabsTrigger value="rendered">Rendered</TabsTrigger>
                     <TabsTrigger value="source">Source</TabsTrigger>
+                    <TabsTrigger value="summary">Summary</TabsTrigger>
                   </TabsList>
                 </div>
 
@@ -375,7 +464,7 @@ export default function FileViewer({
                     value="rendered"
                     className="absolute inset-0 m-0 data-[state=active]:flex data-[state=inactive]:hidden flex-col"
                   >
-                    <div className="flex-1 overflow-y-auto p-4">
+                    <div className="flex-1 overflow-y-auto px-4">
                       <div
                         className="prose max-w-none"
                         style={{
@@ -629,12 +718,132 @@ export default function FileViewer({
                     value="source"
                     className="absolute inset-0 m-0 data-[state=active]:flex data-[state=inactive]:hidden flex-col"
                   >
-                    <div className="flex-1 overflow-y-auto p-4">
+                    <div className="flex-1 overflow-y-auto p-3">
                       <pre className="text-sm bg-gray-50 p-4 rounded border whitespace-pre-wrap">
                         {markdownData?.exists && markdownData.markdown_source
                           ? markdownData.markdown_source
                           : "No content available"}
                       </pre>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent
+                    value="summary"
+                    className="absolute inset-0 m-0 data-[state=active]:flex data-[state=inactive]:hidden flex-col"
+                  >
+                    <div className="flex-1 overflow-y-auto px-4">
+                      {summaryData?.exists && summaryData.markdown_source ? (
+                        <div
+                          className="prose max-w-none"
+                          style={{
+                            lineHeight: "1.6",
+                            fontSize: "12px",
+                            fontFamily: "system-ui, -apple-system, sans-serif",
+                          }}
+                        >
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm, remarkMath]}
+                            rehypePlugins={[rehypeRaw, rehypeKatex]}
+                            components={{
+                              img: ImageComponent,
+                              h1: ({ node, ...props }) => (
+                                <h1
+                                  style={{
+                                    fontSize: "2em",
+                                    fontWeight: "bold",
+                                    marginTop: "1em",
+                                    marginBottom: "0.5em",
+                                    borderBottom: "2px solid #eee",
+                                    paddingBottom: "0.3em",
+                                    wordWrap: "break-word",
+                                  }}
+                                  {...props}
+                                />
+                              ),
+                              h2: ({ node, ...props }) => (
+                                <h2
+                                  style={{
+                                    fontSize: "1.5em",
+                                    fontWeight: "bold",
+                                    marginTop: "1em",
+                                    marginBottom: "0.5em",
+                                    borderBottom: "1px solid #eee",
+                                    paddingBottom: "0.2em",
+                                    wordWrap: "break-word",
+                                  }}
+                                  {...props}
+                                />
+                              ),
+                              h3: ({ node, ...props }) => (
+                                <h3
+                                  style={{
+                                    fontSize: "1.3em",
+                                    fontWeight: "bold",
+                                    marginTop: "0.8em",
+                                    marginBottom: "0.4em",
+                                    wordWrap: "break-word",
+                                  }}
+                                  {...props}
+                                />
+                              ),
+                              p: ({ node, ...props }) => (
+                                <p
+                                  style={{
+                                    marginBottom: "1em",
+                                    lineHeight: "1.6",
+                                    wordWrap: "break-word",
+                                    overflowWrap: "break-word",
+                                  }}
+                                  {...props}
+                                />
+                              ),
+                              ul: ({ node, ...props }) => (
+                                <ul
+                                  style={{
+                                    marginBottom: "1em",
+                                    paddingLeft: "2em",
+                                    wordWrap: "break-word",
+                                  }}
+                                  {...props}
+                                />
+                              ),
+                              li: ({ node, ...props }) => (
+                                <li
+                                  style={{
+                                    marginBottom: "0.3em",
+                                    wordWrap: "break-word",
+                                  }}
+                                  {...props}
+                                />
+                              ),
+                            }}
+                          >
+                            {summaryData.markdown_source}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        <div className="flex-1 flex flex-col items-center justify-center space-y-4">
+                          {generatingSummary ? (
+                            <div className="text-center">
+                              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
+                              <p className="text-lg font-medium">
+                                Generating Summary...
+                              </p>
+                              <p className="text-sm text-gray-500 mt-2">
+                                This may take a few minutes depending on
+                                document size
+                              </p>
+                            </div>
+                          ) : (
+                            <Button
+                              onClick={handleGenerateSummary}
+                              className="px-6 py-3 text-lg"
+                            >
+                              Generate Summary
+                            </Button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </TabsContent>
                 </div>

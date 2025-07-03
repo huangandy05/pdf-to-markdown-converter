@@ -90,7 +90,7 @@ export default function LessonDetail() {
       </div>
 
       {/* Main Content - Split layout with proper panels */}
-      <div className="flex gap-6 p-2 h-[calc(100vh-5rem)]">
+      <div className="flex gap-6 p-2 h-[calc(100vh-5rem)] ">
         {/* Left Panel - Chat Section */}
         <div className="w-1/4">
           <div className="bg-white rounded-lg shadow-sm border h-full">
@@ -99,7 +99,7 @@ export default function LessonDetail() {
         </div>
 
         {/* Right Panel - Tabs Section */}
-        <div className="w-3/4">
+        <div className="w-3/4 h-full ">
           <div className="bg-white rounded-lg shadow-sm border h-full flex flex-col">
             <Tabs defaultValue="files" className="h-full flex flex-col">
               <div className="border-b px-2 py-2 flex items-center justify-between flex-shrink-0">
